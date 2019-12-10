@@ -726,31 +726,7 @@ func waitUntilReservationProvisionable(id string, meta interface{}) error {
 	return err
 }
 
-func getWaitForDeviceLock(deviceID string) *sync.WaitGroup {
-	wgMutex.Lock()
-	defer wgMutex.Unlock()
-	wg, ok := wgMap[deviceID]
-	if !ok {
-		wg = &sync.WaitGroup{}
-		wgMap[deviceID] = wg
-	}
-	return wg
-}
-
 func waitForDeviceAttribute(d *schema.ResourceData, targets []string, pending []string, attribute string, meta interface{}) (string, error) {
-
-	wg := getWaitForDeviceLock(d.Id())
-	wg.Wait()
-
-	wgMutex.Lock()
-	wg.Add(1)
-	wgMutex.Unlock()
-
-	defer func() {
-		wgMutex.Lock()
-		wg.Done()
-		wgMutex.Unlock()
-	}()
 
 	if attribute != "state" && attribute != "network_type" {
 		return "", fmt.Errorf("unsupported attr to wait for: %s", attribute)
@@ -778,25 +754,6 @@ func waitForDeviceAttribute(d *schema.ResourceData, targets []string, pending []
 	attrval, err := stateConf.WaitForState()
 
 	return attrval.(string), err
-}
-
-// powerOnAndWait Powers on the device and waits for it to be active.
-func powerOnAndWait(d *schema.ResourceData, meta interface{}) error {
-	client := meta.(*packngo.Client)
-	_, err := client.Devices.PowerOn(d.Id())
-	if err != nil {
-		return friendlyError(err)
-	}
-
-	_, err = waitForDeviceAttribute(d, []string{"active", "failed"}, []string{"off"}, "state", client)
-	if err != nil {
-		return err
-	}
-	state := d.Get("state").(string)
-	if state != "active" {
-		return friendlyError(fmt.Errorf("Device in non-active state \"%s\"", state))
-	}
-	return nil
 }
 
 func validateFacilityForDevice(v interface{}, k string) (ws []string, errors []error) {
