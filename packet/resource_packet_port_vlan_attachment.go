@@ -2,11 +2,14 @@ package packet
 
 import (
 	"fmt"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/mutexkv"
 	"log"
 
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
 	"github.com/packethost/packngo"
 )
+
+var vlanKV = mutexkv.NewMutexKV()
 
 func resourcePacketPortVlanAttachment() *schema.Resource {
 	return &schema.Resource{
@@ -113,11 +116,9 @@ func resourcePacketPortVlanAttachmentCreate(d *schema.ResourceData, meta interfa
 
 		par.VirtualNetworkID = vlanID
 
-		// Packet doesn't allow multiple VLANs to be assigned
-		// to the same port at the same time
-		lockId := "vlan-attachment-" + port.ID
-		packetMutexKV.Lock(lockId)
-		defer packetMutexKV.Unlock(lockId)
+		// Changes to a port must be serialized in Packet API; use port ID
+		vlanKV.Lock(port.ID)
+		defer vlanKV.Unlock(port.ID)
 
 		_, _, err = client.DevicePorts.Assign(par)
 		if err != nil {
@@ -187,6 +188,11 @@ func resourcePacketPortVlanAttachmentUpdate(d *schema.ResourceData, meta interfa
 	if d.HasChange("native") {
 		native := d.Get("native").(bool)
 		portID := d.Get("port_id").(string)
+
+		// Changes to a port must be serialized in Packet API; use port ID
+		vlanKV.Lock(portID)
+		defer vlanKV.Unlock(portID)
+
 		if native {
 			vlanID := d.Get("vlan_id").(string)
 			par := &packngo.PortAssignRequest{PortID: portID, VirtualNetworkID: vlanID}
@@ -206,26 +212,28 @@ func resourcePacketPortVlanAttachmentUpdate(d *schema.ResourceData, meta interfa
 
 func resourcePacketPortVlanAttachmentDelete(d *schema.ResourceData, meta interface{}) error {
 	client := meta.(*packngo.Client)
-	pID := d.Get("port_id").(string)
+	portID := d.Get("port_id").(string)
 	vlanID := d.Get("vlan_id").(string)
 	native := d.Get("native").(bool)
+
+	// Changes to a port must be serialized in Packet API; use port ID
+	vlanKV.Lock(portID)
+	defer vlanKV.Unlock(portID)
+
 	if native {
-		_, _, err := client.DevicePorts.UnassignNative(pID)
+		_, _, err := client.DevicePorts.UnassignNative(portID)
 		if err != nil {
 			return err
 		}
 	}
-	par := &packngo.PortAssignRequest{PortID: pID, VirtualNetworkID: vlanID}
-	lockId := "vlan-detachment-" + pID
-	packetMutexKV.Lock(lockId)
-	defer packetMutexKV.Unlock(lockId)
+	par := &packngo.PortAssignRequest{PortID: portID, VirtualNetworkID: vlanID}
 	portPtr, _, err := client.DevicePorts.Unassign(par)
 	if err != nil {
 		return err
 	}
 	forceBond := d.Get("force_bond").(bool)
 	if forceBond && (len(portPtr.AttachedVirtualNetworks) == 0) {
-		_, _, err = client.DevicePorts.Bond(&packngo.BondRequest{PortID: pID, BulkEnable: false})
+		_, _, err = client.DevicePorts.Bond(&packngo.BondRequest{PortID: portID, BulkEnable: false})
 		if err != nil {
 			return friendlyError(err)
 		}
