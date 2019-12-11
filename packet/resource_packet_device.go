@@ -8,7 +8,6 @@ import (
 	"reflect"
 	"regexp"
 	"sort"
-	"sync"
 	"time"
 
 	"github.com/hashicorp/errwrap"
@@ -16,12 +15,11 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/structure"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
+
 	"github.com/packethost/packngo"
 )
 
 var matchIPXEScript = regexp.MustCompile(`(?i)^#![i]?pxe`)
-var wgMap = map[string]*sync.WaitGroup{}
-var wgMutex = sync.Mutex{}
 
 func resourcePacketDevice() *schema.Resource {
 	return &schema.Resource{
